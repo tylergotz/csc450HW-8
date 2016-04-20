@@ -5,19 +5,87 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include "sem.h"
 
+void setupServerSocket();
 void broadcast(char* msg, int* clients, int numClients);
+void sendMessage(char* msg, int client);
+void childStuff(int clientfd);
+void receiveMessage(int clientfd);
+
+struct sockaddr_in* server;
+uint16_t port = 3000;
+int sockfd;
+socklen_t serverSize;
 
 int main(int argc, char** argv)
 {
-    uint16_t port = 3000;
-    struct sockaddr_in* server = malloc(sizeof(struct sockaddr_in));
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    char buffer[10241];
-    char* buf;
-    if(sockfd == -1)  
+    server = malloc(sizeof(struct sockaddr_in));
+    int clientfd;
+    int MAX_CLIENTS = 1000;
+    int* clients = malloc(MAX_CLIENTS * sizeof(int));
+    int numberOfConnectedClients = 0;
+    sem_t block;
+    sem_init(&block, 0, 1);
+    
+    char* message = "Hello";
+    int pid;
+    
+    setupServerSocket();
+    
+    while(1)
     {
-        puts("Bad Socket!!!!");
+        printf("Listening....\n");
+        clientfd = accept(sockfd, (struct sockaddr *)server, &serverSize);
+        printf("Client Connected..... %d\n", clientfd);
+        clients[numberOfConnectedClients++] = clientfd;
+        
+        sem_wait(&block);
+        int i;
+        for(i = 0; i < numberOfConnectedClients; i++)
+        {
+            if(clients[i] != NULL)
+            {
+                //send message to all clients
+                sendMessage((char*) receiveMessage(clientfd), clients[i]);
+            }
+        }
+        
+        sem_post(&block);
+        pid = fork();
+        if(pid == 0)
+        {
+            break;
+        }
+    }
+        
+    if(pid == 0)
+    {
+        childStuff(clientfd);
+    }
+}
+
+void childStuff(int clientfd)
+{
+    printf("Child Stuff\n");
+    sendMessage("Hello from the child. Do you have candy?", clientfd);
+    receiveMessage(clientfd);
+}
+
+void receiveMessage(int clientfd)
+{
+    int MAX_SIZE = 2000 * sizeof(char);
+    char* server_reply = malloc(MAX_SIZE);
+    int error = recv(clientfd, server_reply, MAX_SIZE, 0);
+    puts(server_reply);
+}
+
+void setupServerSocket()
+{
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if(sockfd == -1)
+    {
+        puts("Bad Socket!!!!!");
     }
     
     server->sin_family = AF_INET;
@@ -31,43 +99,25 @@ int main(int argc, char** argv)
         perror("setsockopt");
         exit(1);
     }
-    socklen_t serverSize = sizeof(server);
     
-    int bindfd = bind(sockfd, (struct sockaddr *)server, sizeof(struct sockaddr));
-    if(bindfd < 0)
+    serverSize = sizeof(server);
+    int error = bind(sockfd, (struct sockaddr* )server, sizeof(struct sockaddr));
+    if(error < 0)
     {
         puts("Problem with binding...\n");
     }
-    int listenfd;
-    int clientfd;
-    int MAX_CLIENTS = 1000;
-    int* clients = malloc(MAX_CLIENTS * sizeof(int));
-    int numberOfConnectedClients = 0;
     
-    while(1)
-    {
-        listenfd = listen(sockfd, 100);
-        printf("Listening....\n");
-        clientfd = accept(sockfd, (struct sockaddr *) server, &serverSize);
-        
-        
-        clients[numberOfConnectedClients++] = clientfd;
-        char* message = "hello";
-        broadcast(message, clients, numberOfConnectedClients);
-        
-        buffer[num] = '\0';
-        printf("Server:Msg Received %s\n", buffer);
-        if ((send(clientfd,buffer, strlen(buffer),0))== -1) 
-        {
-            fprintf(stderr, "Failure Sending Message\n");
-            close(clientfd);
-            break;
-        }
+    error - listen(sockfd, 100);
 
-        printf("Server:Msg being sent: %s\nNumber of bytes sent: %d\n",buffer, strlen(buffer));
-    }
-    
-    
+}
+
+void sendMessage(char* msg, int client)
+{
+    puts("Sending a message");
+    printf("Size of msg is: %d\n", (int)sizeof(*msg));
+    printf("Size of msg is: %d\n", (int)strlen(msg));
+    send(client, msg, strlen(msg), 0);
+    putts("Message Sent");
 }
 
 void broadcast(char* msg, int* clients, int numClients)
@@ -75,7 +125,8 @@ void broadcast(char* msg, int* clients, int numClients)
     int i;
     for(i = 0; i < numClients; i++)
     {
-        send(*(clients + (i * sizeof(int))) , msg , strlen(msg) , 0);
-        printf("sending to clients: %d", clients + (i * sizeof(int)));
+        printf("Trying to send to client with FD: %d\n", clients[i]);
+        send(clients[i], msg, strlen(msg), 0);
+        puts("sent");
     }
 }
